@@ -3,19 +3,49 @@ on:
   schedule:
     - cron: "30 13 * * 2"   # Tuesdays 13:30 UTC (~9:30am ET)
   workflow_dispatch: {}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      RSPM: https://packagemanager.rstudio.com/cran/__linux__/jammy/latest
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}   # <-- make PAT available to R
     steps:
-      - uses: actions/checkout@v4
-      - uses: r-lib/actions/setup-r@v2
-        with: { r-version: '4.3.3' }
-      - name: Install R packages
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: System libs
         run: |
-          Rscript -e 'install.packages(c("remotes","jsonlite","readr","dplyr","stringr","tidyr"))'
-          Rscript -e 'remotes::install_github("FantasyFootballAnalytics/ffanalytics")'
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libharfbuzz-dev libfribidi-dev libfreetype6-dev \
+            libpng-dev libtiff5-dev libjpeg-dev libfontconfig1-dev
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.3'
+
+      - name: Setup Pandoc
+        uses: r-lib/actions/setup-pandoc@v2
+
+      # --- Install CRAN deps first
+      - name: Install CRAN packages
+        run: |
+          Rscript -e 'install.packages(c(
+            "remotes","jsonlite","readr","dplyr","stringr","tidyr","rvest","xml2","httr"
+          ), repos = Sys.getenv("RSPM"))'
+
+      # --- Install ffanalytics from GitHub using the token
+      - name: Install ffanalytics (GitHub)
+        run: |
+          Rscript -e 'Sys.setenv(GITHUB_PAT = Sys.getenv("GITHUB_PAT"))'
+          Rscript -e 'remotes::install_github("FantasyFootballAnalytics/ffanalytics", upgrade = "never", dependencies = TRUE)'
+
       - name: Build CSVs
         run: Rscript scripts/build_projections.R
+
       - name: Commit CSVs
         run: |
           git config user.name "github-actions"
